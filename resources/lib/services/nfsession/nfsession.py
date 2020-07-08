@@ -124,8 +124,8 @@ class NetflixSession(NFSessionAccess, DirectoryBuilder):
         cookies.save(self.account_hash, self.session.cookies)
 
     @needs_login
-    def _perpetual_path_request_switch_profiles(self, paths, length_params,
-                                                perpetual_range_start=None, no_limit_req=False):
+    def _perpetual_path_request_switch_profiles(self, paths, length_params, perpetual_range_start=None,
+                                                request_size=apipaths.PATH_REQUEST_SIZE_STD, no_limit_req=False):
         """
         Perform a perpetual path request,
         Used exclusively to get My List of a profile other than the current one
@@ -139,7 +139,7 @@ class NetflixSession(NFSessionAccess, DirectoryBuilder):
         self._activate_profile(mylist_profile_guid)
         # Get the My List data
         path_response = self._perpetual_path_request(paths, length_params, perpetual_range_start,
-                                                     no_limit_req)
+                                                     request_size, no_limit_req)
         if mylist_profile_guid != current_profile_guid:
             # Reactive again the previous profile
             self._activate_profile(current_profile_guid)
@@ -152,24 +152,21 @@ class NetflixSession(NFSessionAccess, DirectoryBuilder):
 
     @common.addonsignals_return_call
     def perpetual_path_request(self, paths, length_params, perpetual_range_start=None,
-                               no_limit_req=False):
+                               no_limit_req=False, request_size=apipaths.PATH_REQUEST_SIZE_STD):
         return self._perpetual_path_request(paths, length_params, perpetual_range_start,
-                                            no_limit_req)
+                                            no_limit_req, request_size)
 
     @common.time_execution(immediate=True)
     @needs_login
     def _perpetual_path_request(self, paths, length_params, perpetual_range_start=None,
-                                no_limit_req=False):
-        """Perform a perpetual path request against the Shakti API to retrieve
-        a possibly large video list. If the requested video list's size is
-        larger than MAX_PATH_REQUEST_SIZE, multiple path requests will be
-        executed with forward shifting range selectors and the results will
-        be combined into one path response."""
+                                no_limit_req=False, request_size=apipaths.PATH_REQUEST_SIZE_STD):
+        """Perform a perpetual path request against the Shakti API to retrieve a possibly large video list.
+        If the requested video list's size is larger than 'request_size', multiple path requests will be
+        executed with forward shifting range selectors and the results will be combined into one path response."""
         response_type, length_args = length_params
         context_name = length_args[0]
         response_length = apipaths.LENGTH_ATTRIBUTES[response_type]
 
-        request_size = apipaths.MAX_PATH_REQUEST_SIZE
         response_size = request_size + 1
         # Note: when the request is made with 'genres' or 'seasons' context,
         # the response strangely does not respect the number of objects
@@ -283,16 +280,16 @@ class NetflixSession(NFSessionAccess, DirectoryBuilder):
 
 
 def _set_range_selector(paths, range_start, range_end):
-    """Replace the RANGE_SELECTOR placeholder with an actual dict:
-    {'from': range_start, 'to': range_end}"""
-    import copy
-    # Make a deepcopy because we don't want to lose the original paths
-    # with the placeholder
-    ranged_paths = copy.deepcopy(paths)
+    """
+    Replace the RANGE_PLACEHOLDER with an actual dict:
+    {'from': range_start, 'to': range_end}
+    """
+    from copy import deepcopy
+    # Make a deepcopy because we don't want to lose the original paths with the placeholder
+    ranged_paths = deepcopy(paths)
     for path in ranged_paths:
         try:
-            path[path.index(apipaths.RANGE_SELECTOR)] = (
-                {'from': range_start, 'to': range_end})
+            path[path.index(apipaths.RANGE_PLACEHOLDER)] = {'from': range_start, 'to': range_end}
         except ValueError:
             pass
     return ranged_paths
