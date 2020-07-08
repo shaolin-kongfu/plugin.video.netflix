@@ -22,7 +22,7 @@ except ImportError:
 
 import resources.lib.common as common
 
-from .nfsession import NetflixSession
+from resources.lib.services.nfsession.nfsession import NetflixSession
 
 
 class NetflixHttpRequestHandler(BaseHTTPRequestHandler):

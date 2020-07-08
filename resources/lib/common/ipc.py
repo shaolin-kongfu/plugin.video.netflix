@@ -45,7 +45,7 @@ class Signals(object):  # pylint: disable=no-init
 
 def register_slot(callback, signal=None, source_id=None):
     """Register a callback with AddonSignals for return calls"""
-    name = signal if signal else _signal_name(callback)
+    name = signal if signal else callback.__name__
     AddonSignals.registerSlot(
         signaler_id=source_id or g.ADDON_ID,
         signal=name,
@@ -55,7 +55,7 @@ def register_slot(callback, signal=None, source_id=None):
 
 def unregister_slot(callback, signal=None):
     """Remove a registered callback from AddonSignals"""
-    name = signal if signal else _signal_name(callback)
+    name = signal if signal else callback.__name__
     AddonSignals.unRegisterSlot(
         signaler_id=g.ADDON_ID,
         signal=name)
@@ -175,39 +175,79 @@ def _raise_for_error(callname, result):
             raise Exception(result['error'])
 
 
-def addonsignals_return_call(func):
-    """Makes func return callable through AddonSignals and handles catching, conversion and forwarding of exceptions"""
+def ipc_return_call(func):
+    """
+    Decorator to make a func return callable through IPC
+    and handles catching, conversion and forwarding of exceptions
+    """
     @wraps(func)
     def make_return_call(instance, data):
-        """Makes func return callable through AddonSignals and
-        handles catching, conversion and forwarding of exceptions"""
-        try:
-            result = call(instance, func, data)
-        except Exception as exc:  # pylint: disable=broad-except
-            error('IPC callback raised exception: {exc}', exc=exc)
-            import traceback
-            error(g.py2_decode(traceback.format_exc(), 'latin-1'))
-            result = {
-                'error': exc.__class__.__name__,
-                'message': unicode(exc),
-            }
-        if g.IPC_OVER_HTTP:
-            return result
-        # Do not return None or AddonSignals will keep waiting till timeout
-        if result is None:
-            result = {}
-        AddonSignals.returnCall(signal=_signal_name(func), source_id=g.ADDON_ID, data=result)
-        return result
+        _ipc_return_call_instance(instance, func, data)
     return make_return_call
 
 
-def call(instance, func, data):
+class EnvelopeIPCReturnCall(object):
+    """Makes a function callable through IPC and handles catching, conversion and forwarding of exceptions"""
+    # Defines a type of in-memory reference to avoids define functions in the source code just to handle IPC return call
+    _func = None
+
+    def __init__(self, func):
+        self._func = func
+
+    def call(self, data):
+        """Routes the call to the function associated to the class"""
+        return _ipc_return_call(self._func, data, self._func.__name__)
+
+
+def _ipc_return_call_instance(instance, func, data):
+    try:
+        result = _call_with_instance(instance, func, data)
+    except Exception as exc:  # pylint: disable=broad-except
+        result = _print_convert_exc(exc)
+    return _execute_addonsignals_return_call(result, func.__name__)
+
+
+def _ipc_return_call(func, data, func_name=None):
+    try:
+        result = _call(func, data)
+    except Exception as exc:  # pylint: disable=broad-except
+        result = _print_convert_exc(exc)
+    return _execute_addonsignals_return_call(result, func_name)
+
+
+def _print_convert_exc(exc):
+    # The exception is converted into json to be handled by frontend instance
+    error('IPC callback raised exception: {exc}', exc=exc)
+    import traceback
+    error(g.py2_decode(traceback.format_exc(), 'latin-1'))
+    return {
+        'error': exc.__class__.__name__,
+        'message': unicode(exc),
+    }
+
+
+def _execute_addonsignals_return_call(result, func_name):
+    """If enabled execute AddonSignals return callback"""
+    if g.IPC_OVER_HTTP:
+        return result
+    # Do not return None or AddonSignals will keep waiting till timeout
+    if result is None:
+        result = {}
+    AddonSignals.returnCall(signal=func_name, source_id=g.ADDON_ID, data=result)
+    return result
+
+
+def _call(func, data):
+    if isinstance(data, dict):
+        return func(**data)
+    if data is not None:
+        return func(data)
+    return func()
+
+
+def _call_with_instance(instance, func, data):
     if isinstance(data, dict):
         return func(instance, **data)
     if data is not None:
         return func(instance, data)
     return func(instance)
-
-
-def _signal_name(func):
-    return func.__name__
